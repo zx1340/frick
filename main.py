@@ -22,6 +22,7 @@
 # SOFTWARE.
 #
 #
+from __future__ import print_function
 
 import atexit
 import binascii
@@ -42,7 +43,6 @@ import termios
 import time
 import unicorn
 import webbrowser
-import subprocess
 
 import readline as readline
 
@@ -130,19 +130,6 @@ def log_multicol(what):
             row = ''
     printer.append('\n'.join(f_rows))
 
-def get_prc_id(procname):
-	all_prc = subprocess.check_output('adb shell ps'.split())
-	if type(all_prc) is bytes:
-		prcs=all_prc.decode('utf-8').split('\n')
-	elif type(all_prc) is str:
-		prcs = all_prc.split('\n')
-
-	prc_id = ''
-	for prc in prcs:
-		if procname in prc:
-			prc_id = prc.split()[1]
-			break
-	return prc_id
 
 class Arch(object):
     def __init__(self):
@@ -186,9 +173,9 @@ class Arm(Arch):
     def __init__(self):
         super(Arm, self).__init__()
         self.unicorn_arch = unicorn.UC_ARCH_ARM
-        self.unicorn_mode = unicorn.UC_MODE_ARM
+        self.unicorn_mode = unicorn.UC_MODE_THUMB
         self.capstone_arch = capstone.CS_ARCH_ARM
-        self.capstone_mode = capstone.CS_MODE_ARM
+        self.capstone_mode = capstone.CS_MODE_THUMB
 
     def get_unicorn_constants(self):
         return unicorn.arm_const
@@ -200,13 +187,14 @@ class Arm(Arch):
         r += ['sp', 'pc', 'lr']
         return r
 
+
 class Arm64(Arch):
     def __init__(self):
         super(Arm64, self).__init__()
         self.unicorn_arch = unicorn.UC_ARCH_ARM64
-        self.unicorn_mode = unicorn.UC_MODE_ARM
+        self.unicorn_mode = unicorn.UC_MODE_THUMB
         self.capstone_arch = capstone.CS_ARCH_ARM64
-        self.capstone_mode = capstone.CS_MODE_ARM
+        self.capstone_mode = capstone.CS_MODE_THUMB
 
     def get_unicorn_constants(self):
         return unicorn.arm_const
@@ -218,6 +206,7 @@ class Arm64(Arch):
         r += ['sp', 'pc', 'fp','lr']
         return r
 
+
 class CommandManager(object):
     def __init__(self, cli):
         self.cli = cli
@@ -228,20 +217,20 @@ class CommandManager(object):
         for key in dir(current_module):
             attr = getattr(current_module, key)
             if isinstance(attr, type):
-                try:
-                    if issubclass(attr, Command):
-                        cmd = attr(self.cli)
-                        info = cmd.get_command_info()
-                        if info is not None:
-                            if 'target' in info:
-                                self._map[info['target']] = cmd
-                            else:
-                                self._map[info['name']] = cmd
-                            if 'shortcuts' in info:
-                                for sh in info['shortcuts']:
-                                    self._map[sh] = cmd
-                except:
-                    continue
+                # try:
+                if issubclass(attr, Command):
+                    cmd = attr(self.cli)
+                    info = cmd.get_command_info()
+                    if info is not None:
+                        if 'target' in info:
+                            self._map[info['target']] = cmd
+                        else:
+                            self._map[info['name']] = cmd
+                        if 'shortcuts' in info:
+                            for sh in info['shortcuts']:
+                                self._map[sh] = cmd
+                # except:
+                    # continue
 
     def __handle_add_value__(self, key, value):
         if key.startswith('$'):
@@ -392,28 +381,25 @@ class CommandManager(object):
             return None
         else:
             formatted_args = self._format_args(args)
-            try:
-                data = f_exec(formatted_args)
-                if data is not None:
-                    nn = 'name'
-                    if 'target' in info:
-                        nn = 'target'
-                    if not store:
-                        try:
-                            f_exec = getattr(command, '__%s_result__' % info[nn])
-                            f_exec(data)
-                        except:
-                            pass
-                    else:
-                        try:
-                            f_exec = getattr(command, '__%s_store__' % info[nn])
-                            data = f_exec(data)
-                        except:
-                            pass
-                return data
-            except Exception as e:
-                log('error while running command %s: %s' % (info['name'], e))
-                return None
+            data = f_exec(formatted_args)
+            if data is not None:
+                nn = 'name'
+                if 'target' in info:
+                    nn = 'target'
+                if not store:
+                    try:
+                        f_exec = getattr(command, '__%s_result__' % info[nn])
+                        f_exec(data)
+                    except:
+                        pass
+                else:
+                    try:
+                        f_exec = getattr(command, '__%s_store__' % info[nn])
+                        data = f_exec(data)
+                    except:
+                        pass
+            return data
+         
 
 
 class ContextManager(object):
@@ -552,13 +538,13 @@ class ContextManager(object):
             all_registers = self.context.keys()
         for r in all_registers:
             have_sub = False
-            
+
             if 'value' in self.context[r]:
                 if 'sub' in self.context[r]:
                     have_sub = True
                     value = Color.colorify(self.context[r]['value'], 'red highlight')
                 else:
-                    value = Color.colorify(self.context[r]['value'], 'green highlight')
+                    value = Color.colorify(self.context[r]['value'], 'yellow highlight')
                 reg_name = r.upper()
                 while len(reg_name) < 4:
                     reg_name += ' '
@@ -569,7 +555,15 @@ class ContextManager(object):
                         if i != len(subs) - 1:
                             p += ' -> %s' % Color.colorify(subs[i], 'red highligh')
                         else:
-                            p += ' -> %s' % Color.colorify(subs[i], 'green highligh')
+                            ccolor = 'green'
+                            if 'noval' in self.context[r]:
+                                ccolor = 'red'
+                            p += ' -> %s' % Color.colorify(subs[i], '%s highligh' % ccolor)
+                if 'strval' in self.context[r]:
+                    try:
+                        p += ' | %s' % Color.colorify((self.context[r]['strval']).decode('hex'), 'yellow highlight')
+                    except:
+                        print ("[ERROR]"+self.context[r]['strval'])
                 printer.append(p)
 
     def save(self):
@@ -802,13 +796,13 @@ class Attach(Command):
                 log('failed to connected to remote frida server')
                 return None
         log("Attach process %s" % package)
-        pid = get_prc_id(package)
-        if pid:
+        try:
+            pid = self.cli.frida_device.get_process(package).pid
             log("Process pid: %s" % pid)
             self.cli.frida_process = self.cli.frida_device.attach(package)
 
             log("frida %s" % Color.colorify('attached', 'bold'))
-            
+
             self.cli.frida_script = self.cli.frida_process.create_script(script.get_script(
                 pid,
                 module,
@@ -820,44 +814,8 @@ class Attach(Command):
             self.cli.frida_script.on('destroyed', self.cli.on_frida_script_destroyed)
             self.cli.frida_script.load()
             self.cli.context_manager.set_target(package, module)
-        else:
+        except:
             log("Unable to find process %s "% package)
-    
-class Spawn(Command):
-    def get_command_info(self):
-        return {
-            'name': 'spawn',
-            'args': 1,
-            'info': 'spawm to target package name in arg0 with target module name in arg1',
-            'shortcuts': [
-                'att'
-            ]
-        }
-    def __spawn__(self, args):
-        package = args[0]
-        module = args[1]
-        if not module.endswith('.so'):
-            module += '.so'
-        if self.cli.frida_device is None:
-            if not self.cli.bind_device(5):
-                log('failed to connected to remote frida server')
-                return None
-        pid = self.cli.frida_device.spawn([package])
-        self.cli.frida_process = self.cli.frida_device.attach(pid)
-        log("frida %s" % Color.colorify('attached', 'bold'))
-        self.cli.frida_script = self.cli.frida_process.create_script(script.get_script(
-            pid,
-            module,
-            self.cli.context_manager.get_target_offsets(),
-            self.cli.context_manager.get_dtinit_target_offsets()
-        ))
-        log("script %s" % Color.colorify('injected', 'bold'))
-        self.cli.frida_device.resume(package)
-        self.cli.frida_script.on('message', self.cli.on_frida_message)
-        self.cli.frida_script.on('destroyed', self.cli.on_frida_script_destroyed)
-        self.cli.frida_script.load()
-        self.cli.context_manager.set_target(package, module)
-        return None
 
 
 class Backtrace(Command):
@@ -1104,7 +1062,7 @@ class DisAssembler(Command):
 
 class Emulator(Command):
     def __init__(self, cli):
-        super().__init__(cli)
+        super(Emulator, self).__init__(cli)
 
         self.current_address = 0
         self.current_instruction_size = 0
@@ -1118,8 +1076,11 @@ class Emulator(Command):
 
         self.apix = '-<span style="color: red;">></span> '
         self.space = '&nbsp;'
+        
+        self.uc_context = {'reg':[],'mem':[]}
 
         self.uc_impl = None
+        self.core_mapped=True
 
     def get_command_info(self):
         return {
@@ -1177,6 +1138,9 @@ class Emulator(Command):
             self.uc_impl = imp.load_source('uc_hooks', self.uc_impl)
 
         if self.report:
+            if not os.path.exists('.unicorn_context'):
+                os.mkdir('.unicorn_context')
+
             if not os.path.exists('.emulator'):
                 os.mkdir('.emulator')
             self.session_fp = '.emulator/' + str(int(round(time.time() * 1000))) + '_' + \
@@ -1185,15 +1149,24 @@ class Emulator(Command):
             with open(self.session_file, 'w') as f:
                 f.write('<body text="white" bgcolor="#222222" style="font-size: 1.2em"><br>')
 
+
         self.map_region_by_addr(self.cli.context_manager.get_context_offset())
+        
 
         for reg in self.cli.context_manager.get_context():
             try:
                 __reg = getattr(self.cli.context_manager.get_arch().get_unicorn_constants(),
-                                'UC_ARM_REG_%s' % reg.upper())
+                                    'UC_ARM_REG_%s' % reg.upper())
+
                 self.uc.reg_write(__reg, int(self.cli.context_manager.get_context()[reg]['value'], 16))
+
+                if reg=='pc':
+                    self.uc_context['reg'].append((reg.upper(),self.cli.context_manager.get_context_offset()))
+                else:
+                    self.uc_context['reg'].append((reg.upper(),self.uc.reg_read(__reg)))
             except:
                 pass
+
 
         self.uc.hook_add(unicorn.UC_HOOK_CODE, self.hook_instr)
         self.uc.hook_add(unicorn.UC_HOOK_MEM_WRITE | unicorn.UC_HOOK_MEM_READ, self.hook_mem_access)
@@ -1203,25 +1176,12 @@ class Emulator(Command):
         self.instr_count = 0
         self.mem_access_count = 0
         log('starting emulation at %s' % Color.colorify(
-            '0x%x' % self.cli.context_manager.get_context_offset(), 'red highlight'))
-
-        if self.uc_impl is not None:
-            try:
-                req_offs = self.uc_impl.required_offsets(self.uc, self.cli.context_manager.get_base())
-                self.loading_required_maps = True
-                for o in req_offs:
-                    self._ensure_mapped(o)
-                self.loading_required_maps = False
-            except:
-                pass
-            try:
-                self.uc_impl.on_ready(self.uc, self.cli.context_manager.get_base(),
-                                      self.cli.context_manager.get_context_offset(), args[0])
-            except:
-                pass
+            '0x%s' % hex(self.cli.context_manager.get_context_offset()), 'red highlight'))
 
         try:
-            self.uc.emu_start(self.cli.context_manager.get_context_offset(), args[0])
+            print("TRY TO RUN EMU AT %x"%self.cli.context_manager.get_context_offset())
+            #change pc
+            self.uc.emu_start(self.cli.context_manager.get_context_offset() ,"112233")
         except Exception as e:
             log('error while running emulator: %s' % e)
         self.cli.edit_file(self.session_file)
@@ -1231,66 +1191,12 @@ class Emulator(Command):
         self.current_address = address
         self.current_instruction_size = size
 
-        if self.uc_impl is not None:
-            try:
-                self.uc_impl.on_hook(uc, address - self.cli.context_manager.get_base(), address, size)
-            except:
-                pass
-
-        if self.report:
-            if address > self.current_address + self.current_instruction_size or address < self.current_address:
-                self.write_to_session('<br>')
-
-            for i in self.cs.disasm(bytes(uc.mem_read(address, size)), address):
-                if self.uc_impl is None:
-                    self.instr_count += 1
-                    print('%u instructions traced, %u memory access\r' % (self.instr_count, self.mem_access_count),
-                          end='')
-                    sys.stdout.flush()
-
-                faddr = '0x%x' % i.address
-                baddr = i.address - self.cli.context_manager.get_base()
-
-                is_jmp = False
-                if len(i.groups) > 0:
-                    if 1 in i.groups:
-                        is_jmp = True
-                if is_jmp:
-                    pr = False
-                    if cli.frida_script is not None:
-                        for op in i.operands:
-                            if op.type == 2:
-                                s_off = int(cli.to_x_32(op.imm), 16)
-                                try:
-                                    dbgs = cli.frida_script.exports.dbgsfa(s_off)
-                                except:
-                                    dbgs = None
-
-                                if dbgs is not None:
-                                    pr = True
-                                    sy = ' (%s - %s)' % (dbgs['name'], dbgs['moduleName'])
-                                    self.write_to_session('<span style="color: '
-                                                          '#C36969">%s</span> (<strong>0x%x</strong>):%s<strong>%s'
-                                                          '</strong>%s%s%s '
-                                                          % (faddr, baddr, self.space * 4, i.mnemonic.upper(),
-                                                             self.space * 4, i.op_str, sy))
-                    if not pr:
-                        self.write_to_session('<span style="color: #C36969">%s</span> (<strong>0x%x</strong>):'
-                                              '%s<strong>%s</strong>%s%s'
-                                              % (faddr, baddr, self.space * 4, i.mnemonic.upper(), self.space * 4,
-                                                 i.op_str))
-                else:
-                    self.write_to_session('<span style="color: #C36969">%s</span> (<strong>0x%x</strong>):'
-                                          '%s<strong>%s</strong>%s%s'
-                                          % (
-                                              faddr, baddr, self.space * 4, i.mnemonic.upper(), self.space * 4,
-                                              i.op_str))
-
     def hook_mem_access(self, uc, access, address, size, value, user_data):
         if self.loading_required_maps:
             return
 
         self.mem_access_count += 1
+
 
         if self.report:
             if access == unicorn.UC_MEM_WRITE:
@@ -1302,14 +1208,16 @@ class Emulator(Command):
                 try:
                     self.write_to_session('%s<strong>READ</strong> at <span style="color: #C36969">0x%x</span>,'
                                           ' data size = <strong>%u</strong>, '
-                                          'data value = <span style="color: #74AA7A">0x%x</span>'
-                                          % (self.apix, address, size, int(self.uc.mem_read(address, size).hex(), 16)))
+                                          'data value = <span style="color: #74AA7A">%s</span>'
+                                          % (self.apix, address, size, ''.join('{:02x}'.format(x) for x in self.uc.mem_read(address, size))))
                 except Exception as e:
                     self.write_to_session('%sfailed to <strong>READ</strong> at '
                                           '<span style="color: #C36969">0x%x</span> - err: %s' % (
                                               self.apix, address, e))
 
     def hook_mem_unmapped(self, uc, access, address, size, value, user_data):
+        
+
         if self.report:
             self.write_to_session('%sreading to an unmapped memory region at '
                                   '<span style="color: #C36969">0x%x</span>' % (self.apix, address))
@@ -1319,8 +1227,17 @@ class Emulator(Command):
             start_addr = self.current_address
             if self.cli.context_manager.get_arch().get_unicorn_mode() == unicorn.UC_MODE_THUMB:
                 start_addr += 1
-            uc.emu_start(start_addr, start_addr + self.cli.context_manager.get_pointer_size())
 
+            print("[]RESTART EMU 0x%x"%start_addr)
+
+            print("[]Mem unmmaped 0x%x data %s"%(size,uc.mem_read(address,size)))
+
+            for insn in self.cs.disasm(uc.mem_read(start_addr,size),size):
+                print(insn.op_str)
+
+            uc.emu_start(start_addr, self.cli.context_manager.get_context_offset() +900)
+        else:
+            print("This address cannot be map")
     def _ensure_mapped(self, offset):
         try:
             self.uc.mem_read(offset, 2)
@@ -1328,20 +1245,70 @@ class Emulator(Command):
             self.map_region_by_addr(offset)
 
     def map_region_by_addr(self, addr):
+
+
         range_info = self.cli.frida_script.exports.frba(addr)
+        print ("[]Try to map:"+str(range_info))    
+
+        target_module = self.cli.context_manager.get_target_module()
+
+        print("[]Target module %s"%target_module)
+
         if range_info is not None:
             range_info = json.loads(range_info)
+            print ("[]Range info %s "%range_info)
             if self.report:
                 self.write_to_session('%smapping <strong>%s</strong> at '
                                       '<span style="color: #C36969">%s</span>'
                                       % (self.apix, str(range_info['size']), range_info['base']))
             base = int(range_info['base'], 16)
+
             self.uc.mem_map(base, range_info['size'])
-            self.uc.mem_write(base, self.cli.frida_script.exports.mr(base, range_info['size']))
+            
+            # frida will change memory at break point
+            # so we map current target module to unicorn
+            # this trick wont work with self modify code
+            
+            if range_info.has_key('file') and self.core_mapped:
+                if target_module in range_info['file']['path']:
+                    # os.system('adb pull %s ./'%range_info['file']['path'])
+                    print("[]Map from file")
+                    f = open(target_module,'rb')
+                    f.seek(int(range_info['file']['offset']))
+                    data=f.read()
+                    f.close()
+                    new_mem = data[0:range_info['size']]
+                    # new_mem = self.cli.frida_script.exports.rf(range_info['file']['path'])
+                    
+                    with open('.unicorn_context/%s'%base,'w') as f:
+                        f.write(new_mem)
+                    self.uc.mem_write(base,new_mem)
+                    self.uc_context['mem'].append((base,len(new_mem)))
+                    log ("UC_context"+str(self.uc_context))
+                    #map 1 shot
+                    self.core_mapped=False
+                    return range_info['size']
+
+
+
+            memory_map  = self.cli.frida_script.exports.mr(base, range_info['size'])
+            print("[]Get mem size %d"%len(memory_map))
+            self.uc.mem_write(base, memory_map)
+            #create memory data
+            with open('.unicorn_context/%s'%base,'w') as f:
+                f.write(memory_map)
+            self.uc_context['mem'].append((base,range_info['size']))
+            log ("UC_context"+str(self.uc_context))
             return range_info['size']
+
+        else:
+            print (">Missing Region address ")
+
+
         return 0
 
     def write_to_session(self, what):
+        return
         if self.split_report and os.path.getsize(self.session_file) >> 20 > 7:
             self.sessions_file_split += 1
             self.session_file = self.session_fp + ('-%u.html' % self.sessions_file_split)
@@ -2351,6 +2318,9 @@ class Run(Command):
         }
 
     def __run__(self, args):
+        if self.cli.frida_script is None:
+            log('frida script is not created or destroyed.')
+            return None
         self.cli.frida_script.exports.c()
         for s in self.cli.get_scripts():
             sc = self.cli.get_scripts()[s]
@@ -2633,12 +2603,50 @@ class Set(Command):
         return None
 
 
+class Spawn(Command):
+    def get_command_info(self):
+        return {
+            'name': 'spawn',
+            'args': 1,
+            'info': 'spawm the target package name in arg0 with target module name in arg1',
+            'shortcuts': [
+                'att'
+            ]
+        }
+
+    def __spawn__(self, args):
+        package = args[0]
+        module = args[1]
+        if not module.endswith('.so'):
+            module += '.so'
+        if self.cli.frida_device is None:
+            if not self.cli.bind_device(5):
+                log('failed to connected to remote frida server')
+                return None
+        pid = self.cli.frida_device.spawn([package])
+        self.cli.frida_process = self.cli.frida_device.attach(pid)
+        log("frida %s" % Color.colorify('attached', 'bold'))
+        self.cli.frida_script = self.cli.frida_process.create_script(script.get_script(
+            pid,
+            module,
+            self.cli.context_manager.get_target_offsets(),
+            self.cli.context_manager.get_dtinit_target_offsets()
+        ))
+        log("script %s" % Color.colorify('injected', 'bold'))
+        self.cli.frida_device.resume(package)
+        self.cli.frida_script.on('message', self.cli.on_frida_message)
+        self.cli.frida_script.on('destroyed', self.cli.on_frida_script_destroyed)
+        self.cli.frida_script.load()
+        self.cli.context_manager.set_target(package, module)
+        return None
+
+
 class FridaCli(object):
     def __init__(self):
         self.frida_device = None
         self.frida_process = None
         self.frida_script = None
-        
+
         self.initialized = False
 
         self.bind_device()
@@ -2823,7 +2831,7 @@ class FridaCli(object):
     @staticmethod
     def to_x_32(s):
         from struct import pack
-        if not s: 
+        if not s:
             return '0'
         if cli.context_manager.get_arch().__class__.__name__ == 'Arm64':
             x = pack(">q",s)
@@ -2873,22 +2881,39 @@ class FridaCli(object):
             printer.append(title)
 
     @staticmethod
+    def create_dumps_path_if_needed():
+        if not os.path.exists('.dumps'):
+            os.mkdir('.dumps')
+
+    @staticmethod
     def on_frida_message(message, data):
         if 'payload' in message:
             payload = message['payload']
             try:
                 payload.index(':::')
             except:
-                print(payload)
+                log(payload)
                 return
 
             parts = message['payload'].split(':::')
+
             try:
                 id = int(parts[0])
             except:
                 id = -1
 
             if id < 0:
+                if parts[0] == 'wtf':
+                    FridaCli.create_dumps_path_if_needed()
+                    with open('.dumps/log_' + str(time.time()), 'w') as f:
+                        f.write(parts[1])
+                    return
+                elif parts[1] == 'wbtf':
+                    FridaCli.create_dumps_path_if_needed()
+                    with open('.dumps/dump_' + str(time.time()), 'wb') as f:
+                        f.write(data)
+                    return
+
                 log(message)
                 return
 
@@ -2910,19 +2935,24 @@ class FridaCli(object):
             elif id == 1:
                 log('attached to %s' % Color.colorify(parts[1], 'red highlight'))
             elif id == 2:
-                cli.context_manager.set_context(int(parts[1]), json.loads(parts[2]))
-                name = ''
-                if int(parts[1]) in cli.context_manager.get_target_offsets():
-                    name = cli.context_manager.get_target_offsets()[int(parts[1])]
-                elif int(parts[1]) in cli.context_manager.get_dtinit_target_offsets():
-                    name = Color.colorify('dt_init', 'green highlight') + ' ' + \
-                           cli.context_manager.get_dtinit_target_offsets()[int(parts[1])]
-                if name is not '':
-                    cli.context_title('%s - 0x%x' % (name, cli.context_manager.get_context_offset()), 'green bold',
-                                      True)
-                else:
-                    cli.context_title('0x%x' % (cli.context_manager.get_context_offset()), 'green bold', True)
-                cli.context_manager.print_context()
+                try:
+                    cli.context_manager.set_context(int(parts[1]), json.loads(parts[2]))
+                    name = ''
+                    if int(parts[1]) in cli.context_manager.get_target_offsets():
+                        name = cli.context_manager.get_target_offsets()[int(parts[1])]
+                    elif int(parts[1]) in cli.context_manager.get_dtinit_target_offsets():
+                        name = Color.colorify('dt_init', 'green highlight') + ' ' + \
+                            cli.context_manager.get_dtinit_target_offsets()[int(parts[1])]
+                    if name is not '':
+                        cli.context_title('%s - 0x%x' % (name, cli.context_manager.get_context_offset()), 'green bold',
+                                        True)
+                    else:
+                        cli.context_title('0x%x' % (cli.context_manager.get_context_offset()), 'green bold', True)
+                    cli.context_manager.print_context()
+                except:
+                    print ("[X]"+str(json.loads(parts[2])))
+
+
             elif id == 3:
                 printer.append('-%s thread started: %s\ttarget: %s (%s)' %
                                (Color.colorify('>', 'blue bold'),
